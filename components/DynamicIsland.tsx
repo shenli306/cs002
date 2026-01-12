@@ -56,9 +56,9 @@ export const DynamicIsland: React.FC<DynamicIslandProps> = ({ state, progress, m
             <div className="relative w-10 h-10 flex items-center justify-center shrink-0">
               {state === AppState.SEARCHING && (
                 <>
-                  <div className="absolute inset-0 border-[3px] border-indigo-500/30 rounded-full"></div>
-                  <div className="absolute inset-0 border-[3px] border-indigo-400 rounded-full border-t-transparent animate-spin"></div>
-                  <Search size={16} className="text-indigo-200" />
+                  <div className="absolute inset-0 border-[3px] border-pink-500/30 rounded-full"></div>
+                  <div className="absolute inset-0 border-[3px] border-pink-400 rounded-full border-t-transparent animate-spin"></div>
+                  <Search size={16} className="text-pink-200" />
                 </>
               )}
 
@@ -66,14 +66,14 @@ export const DynamicIsland: React.FC<DynamicIslandProps> = ({ state, progress, m
                 <div className="relative flex items-center justify-center">
                   <svg className="w-10 h-10 -rotate-90" viewBox="0 0 36 36">
                     <path className="text-white/10" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="3" />
-                    <path className="text-indigo-400 drop-shadow-[0_0_10px_rgba(129,140,248,0.5)] transition-all duration-300 ease-out" strokeDasharray={`${progress}, 100`} d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="3" />
+                    <path className="text-pink-400 drop-shadow-[0_0_10px_rgba(244,114,182,0.5)] transition-all duration-300 ease-out" strokeDasharray={`${progress}, 100`} d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="3" />
                   </svg>
                   <span className="absolute text-[10px] font-bold text-white">{progress}</span>
                 </div>
               )}
 
               {state === AppState.PACKING && (
-                <HardDriveDownload size={22} className="text-sky-400 animate-pulse" />
+                <HardDriveDownload size={22} className="text-pink-400 animate-pulse" />
               )}
 
               {(showSuccess || state === AppState.COMPLETE) && (

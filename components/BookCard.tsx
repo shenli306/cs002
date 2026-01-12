@@ -19,11 +19,11 @@ export const BookCard: React.FC<BookCardProps> = ({ novel, onSelect }) => {
       onClick={() => onSelect(novel)}
     >
       {/* Decorative Gradient Background */}
-      <div className="absolute top-0 left-0 w-full h-32 bg-gradient-to-b from-indigo-500/20 to-transparent" />
+      <div className="absolute top-0 left-0 w-full h-32 bg-gradient-to-b from-pink-500/10 via-indigo-500/10 to-transparent" />
 
       <div className="p-6 pt-8 relative flex-1 flex flex-col">
         <div className="flex justify-between items-start mb-4">
-          <div className="w-16 h-24 bg-gradient-to-br from-gray-700 to-gray-900 rounded-lg shadow-lg flex items-center justify-center text-white/20 border border-white/10 shrink-0 overflow-hidden">
+          <div className="w-16 h-24 bg-gradient-to-br from-pink-500/20 to-indigo-500/20 rounded-lg shadow-lg flex items-center justify-center text-white/20 border border-white/10 shrink-0 overflow-hidden">
             {coverUrl ? (
               <img src={coverUrl} alt={novel.title} className="w-full h-full object-cover" loading="lazy" />
             ) : (
