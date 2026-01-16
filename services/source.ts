@@ -8,12 +8,13 @@ const BASE_URL = "https://www.jizai22.com"; // Fallback
 const SHIJIEMINGZHU_URL = "https://www.shijiemingzhu.com";
 const SHUKUGE_URL = "http://www.shukuge.com";
 const DINGDIAN_URL = "https://www.23ddw.net";
+const BQGUI_URL = "https://www.bqgui.cc";
 
 // 搜索缓存喵~ 5分钟过期时间
 const searchCache = new Map<string, { results: Novel[]; timestamp: number }>();
 const CACHE_DURATION = 5 * 60 * 1000; // 5分钟喵~
 
-type SourceKey = 'wanbenge' | 'local' | 'yeduji' | 'shukuge' | 'dingdian';
+type SourceKey = 'wanbenge' | 'local' | 'yeduji' | 'shukuge' | 'dingdian' | 'bqgui';
 
 const parseHTML = (html: string) => new DOMParser().parseFromString(html, "text/html");
 
@@ -1666,7 +1667,146 @@ const dingdianProvider: SourceProvider = {
   }
 };
 
-export const PROVIDERS: SourceProvider[] = [wanbengeProvider, yedujiProvider, shukugeProvider, dingdianProvider, localProvider];
+const bqguiProvider: SourceProvider = {
+  key: 'bqgui',
+  name: '笔趣阁(GUI)',
+  baseUrl: BQGUI_URL,
+  search: async (keyword: string): Promise<Novel[]> => {
+    console.log(`[Bqgui] Searching for: ${keyword}喵~`);
+    // Bqgui usually requires browser search due to AJAX
+    try {
+        const browserSearchUrl = `/api/browser-search?site=bqgui&keyword=${encodeURIComponent(keyword)}`;
+        const response = await fetch(browserSearchUrl, { 
+          signal: AbortSignal.timeout(30000)
+        });
+        const data = await response.json();
+        
+        if (data.success && data.results) {
+          return data.results.map((item: any) => ({
+            id: item.detailUrl,
+            title: item.title,
+            author: item.author || '未知',
+            coverUrl: item.coverUrl || '',
+            description: item.description || '',
+            tags: [],
+            status: 'Unknown',
+            chapters: [],
+            sourceName: '笔趣阁(GUI)',
+            detailUrl: item.detailUrl
+          }));
+        }
+    } catch (e) {
+        console.warn("Bqgui browser search failed喵~", e);
+    }
+    return [];
+  },
+  getDetails: async (novel: Novel): Promise<Novel> => {
+    console.log(`[Bqgui] Getting details for: ${novel.title}喵~`);
+    let html = "";
+    
+    // Always use browser details for Bqgui as it's likely protected/dynamic
+    try {
+        const browserDetailsUrl = `/api/browser-details?url=${encodeURIComponent(novel.detailUrl)}`;
+        const response = await fetch(browserDetailsUrl);
+        const data = await response.json();
+        if (data.success && data.html) {
+          html = data.html;
+        } else {
+          throw new Error("Browser fallback failed喵~");
+        }
+    } catch (e) {
+        console.error("[Bqgui] Browser details failed喵~", e);
+        throw new Error("无法获取小说详情喵~");
+    }
+
+    const doc = parseHTML(html);
+    
+    // Title
+    const titleEl = doc.querySelector('.bookname h1') || doc.querySelector('h1');
+    if (titleEl) novel.title = titleEl.textContent?.trim() || novel.title;
+    
+    // Author
+    const authorEl = doc.querySelector('.author') || doc.querySelector('.bookname .author') || Array.from(doc.querySelectorAll('p, span')).find(el => el.textContent?.includes('作者：'));
+    if (authorEl) novel.author = authorEl.textContent?.replace('作者：', '').trim() || novel.author;
+    
+    // Cover
+    const coverImg = doc.querySelector('.bookimg img') || doc.querySelector('#fmimg img');
+    if (coverImg) {
+        const src = coverImg.getAttribute('src');
+        if (src) novel.coverUrl = src.startsWith('http') ? src : new URL(src, novel.detailUrl).href;
+    }
+    
+    // Description
+    const descEl = doc.querySelector('.intro') || doc.querySelector('.bookintro') || doc.querySelector('#intro');
+    if (descEl) novel.description = descEl.textContent?.trim() || novel.description;
+    
+    // Chapters
+    const chapters: Chapter[] = [];
+    const seenUrls = new Set<string>();
+    
+    // Try multiple selectors for chapter list
+    const listContainers = doc.querySelectorAll('#list dl, .listmain dl, .chapter-list');
+    let foundChapters = false;
+
+    listContainers.forEach(container => {
+        if (foundChapters) return;
+        const links = container.querySelectorAll('dd a, li a');
+        if (links.length > 0) {
+            links.forEach((a, index) => {
+                const href = a.getAttribute('href');
+                const title = a.textContent?.trim() || `第${index + 1}章`;
+                if (href && !href.startsWith('javascript:')) {
+                    const fullUrl = href.startsWith('http') ? href : new URL(href, novel.detailUrl).href;
+                    if (!seenUrls.has(fullUrl)) {
+                        seenUrls.add(fullUrl);
+                        chapters.push({
+                            number: chapters.length + 1,
+                            title,
+                            url: fullUrl
+                        });
+                    }
+                }
+            });
+            if (chapters.length > 0) foundChapters = true;
+        }
+    });
+
+    if (chapters.length === 0) throw new Error("未找到章节列表喵~");
+    
+    return { ...novel, chapters };
+  },
+  getChapterContent: async (chapter: Chapter): Promise<string> => {
+     // Use browser details API to fetch content HTML (since it waits for selectors)
+     try {
+         const browserDetailsUrl = `/api/browser-details?url=${encodeURIComponent(chapter.url!)}`;
+         const response = await fetch(browserDetailsUrl);
+         const data = await response.json();
+         
+         if (data.success && data.html) {
+             const doc = parseHTML(data.html);
+             const contentEl = doc.querySelector('#chaptercontent') || doc.querySelector('#content') || doc.querySelector('.content') || doc.querySelector('.read-content');
+             
+             if (contentEl) {
+                 // Cleanup
+                 contentEl.querySelectorAll('script, style, div[style*="display:none"], .ads').forEach(el => el.remove());
+                 
+                 let text = contentEl.innerHTML
+                    .replace(/<br\s*\/?>/gi, '\n')
+                    .replace(/&nbsp;/g, ' ');
+                 
+                 const tempDiv = document.createElement('div');
+                 tempDiv.innerHTML = text;
+                 return tempDiv.textContent?.trim() || "";
+             }
+         }
+     } catch (e) {
+         console.error("[Bqgui] Content fetch failed", e);
+     }
+     throw new Error("获取章节内容失败喵~");
+  }
+};
+
+export const PROVIDERS: SourceProvider[] = [wanbengeProvider, yedujiProvider, shukugeProvider, dingdianProvider, bqguiProvider, localProvider];
 
 export const searchNovel = async (keyword: string, source: any = 'auto'): Promise<Novel[]> => {
   // Check if keyword is a URL
@@ -1780,6 +1920,7 @@ const getProviderByName = (name: string): SourceProvider | undefined => {
   if (name.includes('夜读集')) return yedujiProvider;
   if (name.includes('书库阁')) return shukugeProvider;
   if (name.includes('顶点小说网')) return dingdianProvider;
+  if (name.includes('笔趣阁(GUI)')) return bqguiProvider;
   return undefined;
 };
 
