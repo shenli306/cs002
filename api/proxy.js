@@ -23,7 +23,8 @@ export default async function handler(req) {
 
     const response = await fetch(targetUrl, {
       headers: headers,
-      method: req.method
+      method: req.method,
+      redirect: 'follow'
     });
 
     const newHeaders = new Headers(response.headers);

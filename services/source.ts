@@ -994,16 +994,12 @@ const yedujiProvider: SourceProvider = {
       let src = coverImg.getAttribute('src');
       if (src) {
         src = src.startsWith('http') ? src : `${YEDUJI_URL}${src}`;
-        // 使用代理包装图片 URL，防止 Referer 检查导致的 403 喵~
-        // 但如果是在本地开发且支持 direct fetch，也可以不包。为了保险起见，我们尝试探测一下。
-        // 不过最稳妥的是：如果是在 Detail 页，图片加载失败，我们应该让 UI 层去处理。
-        // 这里我们返回原始 URL，但在 fetchText 里我们已经有了代理能力。
-        // 实际上，BookCard 组件直接使用 <img src="...">，所以这里必须是一个浏览器可访问的 URL。
-        // 对于夜读集，图片可能有防盗链。我们尝试用公共代理包一层，或者本地代理。
         
-        // 策略：如果是 Vercel 环境 (production)，用 /api/proxy?url=... 包裹
+        // 策略：如果是 Vercel 环境，使用 wsrv.nl 进行图片代理和加速
+        // 这不仅解决了防盗链(403)问题，还解决了 HTTPS 混合内容问题，并且速度更快喵~
         if (typeof window !== 'undefined' && window.location.hostname !== 'localhost') {
-             novel.coverUrl = `/api/proxy?url=${encodeURIComponent(src)}`;
+             // 使用 wsrv.nl (images.weserv.nl) 代理
+             novel.coverUrl = `https://wsrv.nl/?url=${encodeURIComponent(src)}&output=webp`;
         } else {
              novel.coverUrl = src;
         }
@@ -1393,6 +1389,8 @@ const dingdianProvider: SourceProvider = {
     // 方案2: 如果直接搜索没结果，使用浏览器搜索作为备选
     if (finalResults.length === 0) {
       try {
+        // 在 Vercel 环境下，browser-search 可能会 fallback 到客户端解析，
+        // 或者如果配置了 puppeteer，会使用 puppeteer。
         const browserSearchUrl = `/api/browser-search?site=dingdian&keyword=${encodeURIComponent(keyword)}`;
         const response = await fetch(browserSearchUrl, { 
           signal: AbortSignal.timeout(30000) // 30秒超时喵
