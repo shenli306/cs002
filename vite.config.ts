@@ -1061,6 +1061,16 @@ export default defineConfig(({ mode }) => {
               console.error('[Browser Search] dingdian manual search also failed喵~', fallbackError);
             }
           }
+        } else if (site === 'bqgui') {
+          // bqgui.cc search logic
+          const searchUrl = `https://www.bqgui.cc/s?q=${encodeURIComponent(keyword)}`;
+          await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+          
+          try {
+            await page.waitForSelector('.bookbox', { timeout: 10000 });
+          } catch (e) {
+            console.log('[Browser Search] bqgui wait timeout');
+          }
         } else {
                     // Generic fallback for other sites
                     const searchPageUrl = searchUrl;
@@ -1197,6 +1207,28 @@ export default defineConfig(({ mode }) => {
                                   coverUrl
                                 });
                               }
+                            }
+                          }
+                        });
+                      }
+
+                      if (currentSite === 'bqgui') {
+                        const items = document.querySelectorAll('.bookbox');
+                        items.forEach(item => {
+                          const link = item.querySelector('.bookname a') as HTMLAnchorElement;
+                          if (link) {
+                            const title = link.innerText?.trim() || '';
+                            const author = item.querySelector('.author')?.innerText?.replace('作者：', '').trim() || '未知';
+                            if (isRelevant(title, author)) {
+                               const img = item.querySelector('.bookimg img') as HTMLImageElement;
+                               const coverUrl = img ? img.src : '';
+                               const description = item.querySelector('.update')?.innerText?.replace('简介：', '').trim() || '';
+                               
+                               if (!novels.some(n => n.detailUrl === link.href)) {
+                                 novels.push({
+                                   title, detailUrl: link.href, author, description, coverUrl
+                                 });
+                               }
                             }
                           }
                         });
@@ -1349,6 +1381,9 @@ export default defineConfig(({ mode }) => {
                   // 如果是顶点小说网，尝试等待特定的列表元素喵
                   if (targetUrl.includes('23ddw.net')) {
                     await page.waitForSelector('#list, .chapter-list, .section-list, #nr', { timeout: 5000 }).catch(() => {});
+                  }
+                  if (targetUrl.includes('bqgui.cc')) {
+                    await page.waitForSelector('#list, .listmain, #content, #chaptercontent', { timeout: 8000 }).catch(() => {});
                   }
 
                   const content = await page.content();
