@@ -282,24 +282,18 @@ interface SourceProvider {
 }
 
 const PROXY_LIST = [
-  // 1. 优先使用本地配置好的 Vite 代理，它们带有特定的请求头喵~
-  (url: string) => {
-    if (url.includes('www.jizai22.com')) {
-      return url.replace('https://www.jizai22.com', '/proxy/wanbenge');
-    }
-    if (url.includes('www.yeduji.com')) {
-      return url.replace('https://www.yeduji.com', '/proxy/yeduji');
-    }
-    if (url.includes('www.shukuge.com')) {
-      return url.replace('http://www.shukuge.com', '/proxy/shukuge');
-    }
-    if (url.includes('www.23ddw.net')) {
-      return url.replace('https://www.23ddw.net', '/proxy/dingdian');
-    }
-    return url;
-  },
-  // 2. 本地万能 Node 代理喵~
+  // 1. 优先使用 Vercel API 代理 (Production / Vercel Environment)
   (url: string) => `/api/proxy?url=${encodeURIComponent(url)}`,
+  // 2. 本地 Vite 代理 (Dev Environment - defined in vite.config.ts)
+  (url: string) => {
+    if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
+        if (url.includes('www.jizai22.com')) return url.replace('https://www.jizai22.com', '/proxy/wanbenge');
+        if (url.includes('www.yeduji.com')) return url.replace('https://www.yeduji.com', '/proxy/yeduji');
+        if (url.includes('www.shukuge.com')) return url.replace('http://www.shukuge.com', '/proxy/shukuge');
+        if (url.includes('www.23ddw.net')) return url.replace('https://www.23ddw.net', '/proxy/dingdian');
+    }
+    return url; // Skip if not localhost
+  },
   // 3. 外部公共代理兜底喵~
   (url: string) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
   (url: string) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
@@ -997,8 +991,23 @@ const yedujiProvider: SourceProvider = {
     // 提取封面
     const coverImg = doc.querySelector('main img[src*="/data/cover/"]') || doc.querySelector('main img');
     if (coverImg) {
-      const src = coverImg.getAttribute('src');
-      novel.coverUrl = src?.startsWith('http') ? src : `${YEDUJI_URL}${src}`;
+      let src = coverImg.getAttribute('src');
+      if (src) {
+        src = src.startsWith('http') ? src : `${YEDUJI_URL}${src}`;
+        // 使用代理包装图片 URL，防止 Referer 检查导致的 403 喵~
+        // 但如果是在本地开发且支持 direct fetch，也可以不包。为了保险起见，我们尝试探测一下。
+        // 不过最稳妥的是：如果是在 Detail 页，图片加载失败，我们应该让 UI 层去处理。
+        // 这里我们返回原始 URL，但在 fetchText 里我们已经有了代理能力。
+        // 实际上，BookCard 组件直接使用 <img src="...">，所以这里必须是一个浏览器可访问的 URL。
+        // 对于夜读集，图片可能有防盗链。我们尝试用公共代理包一层，或者本地代理。
+        
+        // 策略：如果是 Vercel 环境 (production)，用 /api/proxy?url=... 包裹
+        if (typeof window !== 'undefined' && window.location.hostname !== 'localhost') {
+             novel.coverUrl = `/api/proxy?url=${encodeURIComponent(src)}`;
+        } else {
+             novel.coverUrl = src;
+        }
+      }
     }
 
     // 提取作者
@@ -1688,6 +1697,55 @@ const bqguiProvider: SourceProvider = {
   baseUrl: BQGUI_URL,
   search: async (keyword: string): Promise<Novel[]> => {
     console.log(`[Bqgui] Searching for: ${keyword}喵~`);
+    
+    // 优先尝试客户端直接 Fetch + Proxy (绕过 Puppeteer 限制)
+    try {
+        const searchUrl = `${BQGUI_URL}/s?q=${encodeURIComponent(keyword)}`;
+        const html = await fetchText(searchUrl);
+        const doc = parseHTML(html);
+        
+        const results: Novel[] = [];
+        const items = doc.querySelectorAll('.bookbox');
+        
+        if (items.length > 0) {
+            console.log(`[Bqgui] Found ${items.length} items via direct fetch喵~`);
+            items.forEach(item => {
+                const link = item.querySelector('.bookname a') as HTMLAnchorElement;
+                if (link) {
+                    const title = link.textContent?.trim() || '';
+                    const author = item.querySelector('.author')?.textContent?.replace('作者：', '').trim() || '未知';
+                    const img = item.querySelector('.bookimg img') as HTMLImageElement;
+                    const coverUrl = img ? img.src : '';
+                    // 尝试从 .update 或 .intro 或 .uptime 提取简介
+                    let description = item.querySelector('.update')?.textContent?.replace('简介：', '').trim() || 
+                                      item.querySelector('.intro')?.textContent?.replace('简介：', '').trim() || 
+                                      item.querySelector('.uptime')?.textContent?.replace('简介：', '').trim() || '';
+                    
+                    const href = link.getAttribute('href');
+                    const detailUrl = href ? (href.startsWith('http') ? href : `${BQGUI_URL}${href}`) : '';
+
+                    if (detailUrl && !results.some(n => n.detailUrl === detailUrl)) {
+                        results.push({
+                            id: detailUrl,
+                            title, 
+                            detailUrl, 
+                            author, 
+                            description, 
+                            coverUrl,
+                            tags: [],
+                            status: 'Unknown',
+                            chapters: [],
+                            sourceName: '笔趣阁(GUI)'
+                        });
+                    }
+                }
+            });
+            return results;
+        }
+    } catch (directError) {
+        console.warn("[Bqgui] Direct fetch failed, trying API fallback喵~", directError);
+    }
+
     // Bqgui usually requires browser search due to AJAX
     try {
         const browserSearchUrl = `/api/browser-search?site=bqgui&keyword=${encodeURIComponent(keyword)}`;
