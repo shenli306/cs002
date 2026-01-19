@@ -13,7 +13,9 @@ export default async function handler(req) {
 
   try {
     const headers = new Headers();
-    headers.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    // Forward User-Agent from client if available, otherwise use default
+    const clientUA = req.headers.get('user-agent');
+    headers.set('User-Agent', clientUA || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
     
     // Add Referer if needed (extract origin from target)
     try {
@@ -21,7 +23,7 @@ export default async function handler(req) {
         const targetOrigin = urlObj.origin + '/';
         headers.set('Referer', targetOrigin);
         headers.set('Origin', urlObj.origin);
-        headers.set('Host', urlObj.host);
+        // headers.set('Host', urlObj.host); // Do not set Host manually, let fetch handle it
     } catch (e) {}
 
     const response = await fetch(targetUrl, {

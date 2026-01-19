@@ -11,13 +11,13 @@ export default defineConfig(({ mode }) => {
       host: '0.0.0.0',
       proxy: {
         '/proxy/wanbenge': {
-          target: 'https://www.wanbenge.org',
+          target: 'https://www.jizai22.com',
           changeOrigin: true,
           secure: false,
           rewrite: (path) => path.replace(/^\/proxy\/wanbenge/, ''),
           headers: {
-            'Referer': 'https://www.wanbenge.org/',
-            'Origin': 'https://www.wanbenge.org',
+            'Referer': 'https://www.jizai22.com/',
+            'Origin': 'https://www.jizai22.com',
             'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1'
           }
         },
@@ -1163,22 +1163,38 @@ export default defineConfig(({ mode }) => {
                         }
 
                         // Strategy 2: .bookbox (Standard view)
-                        const bookboxes = document.querySelectorAll('.bookbox');
+                        const bookboxes = document.querySelectorAll('.bookbox, .listitem');
                         if (bookboxes.length > 0) {
                           bookboxes.forEach(item => {
-                            const link = item.querySelector('.bookname a') as HTMLAnchorElement;
+                            const link = (item.querySelector('.bookname a') || item.querySelector('h2 a')) as HTMLAnchorElement;
                             if (link) {
                               const title = link.textContent?.trim() || '';
-                              const author = item.querySelector('.author')?.textContent?.replace('作者：', '').trim() || '未知';
+                              const author = (item.querySelector('.author') || item.querySelector('.bookdesc .sp span:first-child'))?.textContent?.replace('作者：', '').trim() || '未知';
                               if (isRelevant(title, author)) {
                                 const existingIndex = novels.findIndex(n => n.detailUrl === link.href);
-                                let newCover = (item.querySelector('.bookimg img') as HTMLImageElement)?.src || '';
+                                let newCover = (item.querySelector('.bookimg img') || item.querySelector('.cover img'))?.getAttribute('src') || '';
                                 if (newCover.includes('nocover')) newCover = '';
                                 
+                                let description = '';
+                                const updateEl = item.querySelector('.update');
+                                const introEl = item.querySelector('.intro');
+                                const descEl = item.querySelector('.desc');
+                                const bookDescEl = item.querySelector('.bookdesc .desc'); // 针对 shukuge 的 .bookdesc .desc
+                                
+                                if (updateEl) description = updateEl.textContent?.replace('简介：', '').trim() || '';
+                                else if (introEl) description = introEl.textContent?.replace('简介：', '').trim() || '';
+                                else if (bookDescEl) description = bookDescEl.textContent?.replace('简介：', '').trim() || ''; // 优先匹配具体的 .bookdesc .desc
+                                else if (descEl) description = descEl.textContent?.replace('简介：', '').trim() || '';
+
+                                // 移除 "热搜小说：" 开头的错误简介
+                                if (description.includes('热搜小说：')) {
+                                    description = '';
+                                }
+
                                 if (existingIndex === -1) {
                                     novels.push({
                                       title, detailUrl: link.href, author,
-                                      description: item.querySelector('.update')?.textContent?.replace('简介：', '').trim() || '',
+                                      description: description,
                                       coverUrl: newCover
                                     });
                                 } else if (newCover && !novels[existingIndex].coverUrl) {

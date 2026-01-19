@@ -346,7 +346,7 @@ const fetchText = async (url: string, options?: RequestInit, encoding = 'utf-8')
 
       // 为 fetch 添加超时控制喵~
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 6000); // 6秒超时，加速失败切换喵~
+      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15秒超时，给公共代理更多时间喵~
 
       try {
         console.log(`[Proxy] Trying ${proxyFn.name || 'proxy'}: ${proxyUrl} for ${targetUrl}喵~`);
@@ -1216,17 +1216,25 @@ const shukugeProvider: SourceProvider = {
       
       // 优化简介提取逻辑
       let description = "";
-      const descEl = item.querySelector('.bookdesc .desc:last-child') || item.querySelector('.bookdesc');
+      const descNodes = item.querySelectorAll('.bookdesc .desc');
+      let descEl: Element | null = null;
+      if (descNodes.length > 0) {
+        descEl = descNodes[descNodes.length - 1];
+      } else {
+        descEl = item.querySelector('.bookdesc') || item.querySelector('.desc');
+      }
+
       if (descEl) {
-          const text = descEl.textContent || "";
+        const text = (descEl.textContent || "").trim();
+        if (text && !text.includes('热搜小说：')) {
           if (text.includes('简介：')) {
-              description = text.split('简介：')[1].trim();
+            description = text.split('简介：')[1].trim();
           } else if (text.includes('简介:')) {
-              description = text.split('简介:')[1].trim();
+            description = text.split('简介:')[1].trim();
           } else {
-              // 如果没有明显前缀，尝试移除作者等元数据后作为简介
-              description = text.replace(/作者：.*分类：.*/, '').trim();
+            description = text.replace(/作者：.*分类：.*/, '').trim();
           }
+        }
       }
       
       if (isRelevant(title, author, keyword)) {
@@ -1307,18 +1315,38 @@ const shukugeProvider: SourceProvider = {
 
     // 提取简介
     const descEl = detailDoc.querySelector('.bookintro') || detailDoc.querySelector('.intro') || 
-                   Array.from(detailDoc.querySelectorAll('p')).find(p => p.textContent?.length > 50);
-    if (descEl) novel.description = descEl.textContent?.trim() || novel.description;
+                   Array.from(detailDoc.querySelectorAll('p')).find(p => p.textContent?.length > 50 && !p.textContent?.includes('热搜小说：'));
+    
+    if (descEl) {
+      const text = descEl.textContent?.trim() || "";
+      if (text && !text.includes('热搜小说：')) {
+        novel.description = text;
+      }
+    }
 
-    console.log(`[Shukuge] Fetching chapters from: ${indexUrl}喵~`);
-    const html = await fetchText(indexUrl);
-    const doc = parseHTML(html);
     const chapters: Chapter[] = [];
+    const seenUrls = new Set<string>();
+
+    // 尝试直接从详情页提取章节，减少一次请求喵~
+    let links = detailDoc.querySelectorAll('a[href*=".html"]');
+    // 如果详情页链接太少（可能是推荐位），或者明确没有目录结构，再请求目录页
+    const listContainer = detailDoc.querySelector('#list') || detailDoc.querySelector('.listmain');
+    
+    if (links.length < 20 && !listContainer) {
+       console.log(`[Shukuge] Chapters not sufficient in detail page, fetching from: ${indexUrl}喵~`);
+       try {
+         const indexHtml = await fetchText(indexUrl);
+         const indexDoc = parseHTML(indexHtml);
+         links = indexDoc.querySelectorAll('a[href*=".html"]');
+       } catch (e) {
+         console.warn(`[Shukuge] Failed to fetch chapter list from ${indexUrl}喵~`, e);
+         // 如果失败了，就只能用详情页的了
+       }
+    } else {
+       console.log(`[Shukuge] Found chapters directly in detail page, skipping extra request喵~`);
+    }
     
     // 提取章节
-    const links = doc.querySelectorAll('a[href*=".html"]');
-    const seenUrls = new Set<string>();
-    
     links.forEach(link => {
       const href = link.getAttribute('href') || "";
       const title = link.textContent?.trim() || "";
@@ -1848,19 +1876,29 @@ const bqguiProvider: SourceProvider = {
     console.log(`[Bqgui] Getting details for: ${novel.title}喵~`);
     let html = "";
     
-    // Always use browser details for Bqgui as it's likely protected/dynamic
+    // 优先尝试直接 fetch，速度更快喵~
     try {
-        const browserDetailsUrl = `/api/browser-details?url=${encodeURIComponent(novel.detailUrl)}`;
-        const response = await fetch(browserDetailsUrl);
-        const data = await response.json();
-        if (data.success && data.html) {
-          html = data.html;
-        } else {
-          throw new Error("Browser fallback failed喵~");
-        }
+       html = await fetchText(novel.detailUrl);
+       // 简单的反爬检查
+       if (html.length < 500 || html.includes('正在进行安全检查') || html.includes('Just a moment') || html.includes('验证')) {
+           throw new Error("Possible anti-bot check");
+       }
+       console.log(`[Bqgui] Direct fetch successful (${html.length} chars)喵~`);
     } catch (e) {
-        console.error("[Bqgui] Browser details failed喵~", e);
-        throw new Error("无法获取小说详情喵~");
+       console.log(`[Bqgui] Direct fetch failed or blocked, falling back to browser API喵~`);
+       try {
+           const browserDetailsUrl = `/api/browser-details?url=${encodeURIComponent(novel.detailUrl)}`;
+           const response = await fetch(browserDetailsUrl);
+           const data = await response.json();
+           if (data.success && data.html) {
+             html = data.html;
+           } else {
+             throw new Error("Browser fallback failed喵~");
+           }
+       } catch (err) {
+           console.error("[Bqgui] Browser details also failed喵~", err);
+           throw new Error("无法获取小说详情喵~");
+       }
     }
 
     const doc = parseHTML(html);
@@ -1961,47 +1999,69 @@ const bqguiProvider: SourceProvider = {
     return { ...novel, chapters };
   },
   getChapterContent: async (chapter: Chapter): Promise<string> => {
-     // Use browser details API to fetch content HTML (since it waits for selectors)
+     console.log(`[Bqgui] Getting content for: ${chapter.title}喵~`);
+
+     const parseContent = (html: string): string | null => {
+         const doc = parseHTML(html);
+         // 笔趣阁的内容可能在 #chaptercontent 或 #content 中
+         const contentEl = doc.querySelector('#chaptercontent') || doc.querySelector('#content') || doc.querySelector('.content') || doc.querySelector('.read-content');
+         
+         if (contentEl) {
+             // Cleanup
+             contentEl.querySelectorAll('script, style, div[style*="display:none"], .ads').forEach(el => el.remove());
+             
+             let text = contentEl.innerHTML
+                .replace(/<br\s*\/?>/gi, '\n')
+                .replace(/&nbsp;/g, ' ');
+             
+             const tempDiv = document.createElement('div');
+             tempDiv.innerHTML = text;
+             let cleanText = tempDiv.textContent?.trim() || "";
+
+             // 如果内容为空，尝试直接从 body 获取（针对某些反爬情况）
+             if (!cleanText) {
+                const bodyText = doc.body.textContent || "";
+                // 尝试截取“上一章”和“下一章”之间的内容
+                const startMarker = "上一章";
+                const endMarker = "下一章";
+                const startIndex = bodyText.indexOf(startMarker);
+                const endIndex = bodyText.lastIndexOf(endMarker);
+                
+                if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
+                    cleanText = bodyText.substring(startIndex + startMarker.length, endIndex).trim();
+                    // 进一步清理可能包含的导航文字
+                    cleanText = cleanText.replace(/目录|加入书签|投票推荐/g, '').trim();
+                }
+             }
+             
+             return cleanText;
+         }
+         return null;
+     };
+
+     // 1. 优先尝试直接 fetch 喵~
+     try {
+         const html = await fetchText(chapter.url!);
+         if (html && html.length > 500 && !html.includes('正在进行安全检查') && !html.includes('Just a moment')) {
+             const content = parseContent(html);
+             if (content) {
+                 console.log(`[Bqgui] Direct content fetch successful喵~`);
+                 return content;
+             }
+         }
+     } catch (e) {
+         console.warn("[Bqgui] Direct content fetch failed, fallback to browser", e);
+     }
+
+     // 2. Use browser details API to fetch content HTML (since it waits for selectors)
      try {
          const browserDetailsUrl = `/api/browser-details?url=${encodeURIComponent(chapter.url!)}`;
          const response = await fetch(browserDetailsUrl);
          const data = await response.json();
          
          if (data.success && data.html) {
-             const doc = parseHTML(data.html);
-             // 笔趣阁的内容可能在 #chaptercontent 或 #content 中
-             const contentEl = doc.querySelector('#chaptercontent') || doc.querySelector('#content') || doc.querySelector('.content') || doc.querySelector('.read-content');
-             
-             if (contentEl) {
-                 // Cleanup
-                 contentEl.querySelectorAll('script, style, div[style*="display:none"], .ads').forEach(el => el.remove());
-                 
-                 let text = contentEl.innerHTML
-                    .replace(/<br\s*\/?>/gi, '\n')
-                    .replace(/&nbsp;/g, ' ');
-                 
-                 const tempDiv = document.createElement('div');
-                 tempDiv.innerHTML = text;
-                 let cleanText = tempDiv.textContent?.trim() || "";
-
-                 // 如果内容为空，尝试直接从 body 获取（针对某些反爬情况）
-                 if (!cleanText) {
-                    const bodyText = doc.body.textContent || "";
-                    // 尝试截取“上一章”和“下一章”之间的内容
-                    const startMarker = "上一章";
-                    const endMarker = "下一章";
-                    const startIndex = bodyText.indexOf(startMarker);
-                    const endIndex = bodyText.lastIndexOf(endMarker);
-                    
-                    if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
-                        cleanText = bodyText.substring(startIndex + startMarker.length, endIndex).trim();
-                        // 进一步清理可能包含的导航文字
-                        cleanText = cleanText.replace(/目录|加入书签|投票推荐/g, '').trim();
-                    }
-                 }
-                 
-                 return cleanText;
-             }
+             const content = parseContent(data.html);
+             if (content) return content;
          }
      } catch (e) {
          console.error("[Bqgui] Content fetch failed", e);
@@ -2183,8 +2243,15 @@ export const downloadAndParseNovel = async (novel: Novel, onProgress: (msg: stri
     onProgress(`准备下载 ${novel.chapters.length} 章...`, 0);
 
     // 完本阁对频率限制非常严格，所以我们要慢一点喵~
+    // 笔趣阁等其他源通常可以承受更高的并发喵~
     const isWanbenge = name.includes('完本阁');
-    const limit = pLimit(isWanbenge ? 2 : 3); 
+    const isBqgui = name.includes('笔趣阁') || name.includes('bqgui');
+    
+    // 完本阁维持 2，笔趣阁提升到 15，其他源提升到 5 喵~
+    const concurrency = isWanbenge ? 2 : (isBqgui ? 15 : 5);
+    console.log(`[Download] Starting download with concurrency: ${concurrency} for ${name}喵~`);
+    
+    const limit = pLimit(concurrency); 
     let completed = 0;
     let failedCount = 0;
     
