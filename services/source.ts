@@ -374,7 +374,15 @@ const fetchText = async (url: string, options?: RequestInit, encoding = 'utf-8')
 
          // TextDecoder might not support 'gbk' in all browsers, 'gb18030' is a safer superset
          const decoder = new TextDecoder(encoding === 'gbk' ? 'gb18030' : encoding);
-         return decoder.decode(buffer);
+         const text = decoder.decode(buffer);
+
+         // Anti-bot detection 喵~
+         if (text.includes('Just a moment...') || text.includes('Attention Required! | Cloudflare') || (text.length < 200 && !text.includes('html'))) {
+              console.warn(`[Fetch] Proxy ${proxyUrl} returned anti-bot page or invalid content. Retrying...喵~`);
+              throw new Error('Anti-bot page detected');
+         }
+
+         return text;
        } catch (e) {
         clearTimeout(timeoutId);
         throw e;
@@ -392,6 +400,12 @@ const fetchText = async (url: string, options?: RequestInit, encoding = 'utf-8')
 
 // Helper to fetch blob (for download)
 export const fetchBlob = async (url: string): Promise<Blob> => {
+  if (url.startsWith('/')) {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return await response.blob();
+  }
+
   const targetUrl = url.startsWith('http') ? url : `${WANBENGE_URL}${url.startsWith('/') ? '' : '/'}${url}`;
 
   try {
@@ -416,6 +430,25 @@ const isUrl = (str: string) => {
     } catch {
         return false;
     }
+};
+
+const proxifyImage = (url: string) => {
+  if (!url) return '';
+  try {
+    if (typeof window !== 'undefined') {
+      const isLocalDev = window.location.hostname === 'localhost' && window.location.protocol === 'http:';
+      if (isLocalDev) return url;
+    }
+  } catch {
+  }
+
+  if (url.startsWith('/api/proxy?url=')) return url;
+  if (url.startsWith('//')) return `/api/proxy?url=${encodeURIComponent(`https:${url}`)}`;
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    return `/api/proxy?url=${encodeURIComponent(url)}`;
+  }
+
+  return `/api/proxy?url=${encodeURIComponent(url)}`;
 };
 
 const wanbengeProvider: SourceProvider = {
@@ -964,6 +997,9 @@ const yedujiProvider: SourceProvider = {
       if (coverUrl && !coverUrl.startsWith('http')) {
         coverUrl = `${YEDUJI_URL}${coverUrl}`;
       }
+      
+      // 统一使用代理处理封面 喵~
+      coverUrl = proxifyImage(coverUrl);
 
       results.push({
         id: detailUrl,
@@ -994,15 +1030,7 @@ const yedujiProvider: SourceProvider = {
       let src = coverImg.getAttribute('src');
       if (src) {
         src = src.startsWith('http') ? src : `${YEDUJI_URL}${src}`;
-        
-        // 策略：如果是 Vercel 环境，使用 wsrv.nl 进行图片代理和加速
-        // 这不仅解决了防盗链(403)问题，还解决了 HTTPS 混合内容问题，并且速度更快喵~
-        if (typeof window !== 'undefined' && window.location.hostname !== 'localhost') {
-             // 使用 wsrv.nl (images.weserv.nl) 代理
-             novel.coverUrl = `https://wsrv.nl/?url=${encodeURIComponent(src)}&output=webp`;
-        } else {
-             novel.coverUrl = src;
-        }
+        novel.coverUrl = proxifyImage(src);
       }
     }
 
@@ -1147,6 +1175,13 @@ const yedujiProvider: SourceProvider = {
   }
 };
 
+const cleanShukugeTitle = (title: string) => {
+  return (title || '')
+    .replace(/[（(]\s*txt\s*全集\s*[)）]/ig, '')
+    .replace(/\s*(txt\s*全集|TXT\s*全集|TXT全集|全集TXT|全集\s*txt|txt\s*下载|TXT\s*下载|全集\s*下载)\s*$/ig, '')
+    .trim();
+};
+
 const shukugeProvider: SourceProvider = {
   key: 'shukuge',
   name: '书库阁',
@@ -1165,7 +1200,7 @@ const shukugeProvider: SourceProvider = {
       const titleEl = item.querySelector('h2 a') as HTMLAnchorElement;
       if (!titleEl) return;
       
-      const title = titleEl.textContent?.trim() || "";
+      const title = cleanShukugeTitle(titleEl.textContent?.trim() || "");
       const href = titleEl.getAttribute('href') || "";
       const authorMatch = item.querySelector('.bookdesc')?.textContent?.match(/作者：(.*?)(?=\s|分类|$)/);
       const author = authorMatch ? authorMatch[1].trim() : "未知";
@@ -1175,6 +1210,9 @@ const shukugeProvider: SourceProvider = {
       if (coverUrl && !coverUrl.startsWith('http')) {
         coverUrl = `${SHUKUGE_URL}${coverUrl}`;
       }
+      
+      // 解决 HTTPS 下无法加载 HTTP 图片的问题 喵~
+      coverUrl = proxifyImage(coverUrl);
       
       // 优化简介提取逻辑
       let description = "";
@@ -1211,7 +1249,7 @@ const shukugeProvider: SourceProvider = {
     if (results.length === 0) {
       const links = doc.querySelectorAll('a[href*="/book/"]');
       links.forEach(link => {
-        const title = link.textContent?.trim() || "";
+        const title = cleanShukugeTitle(link.textContent?.trim() || "");
         if (title && isRelevant(title, "未知", keyword)) {
           const href = link.getAttribute('href') || "";
           const detailUrl = href.startsWith('http') ? href : `${SHUKUGE_URL}${href}`;
@@ -1247,7 +1285,7 @@ const shukugeProvider: SourceProvider = {
     
     // 提取元数据
     const titleEl = detailDoc.querySelector('h1');
-    if (titleEl) novel.title = titleEl.textContent?.trim() || novel.title;
+    if (titleEl) novel.title = cleanShukugeTitle(titleEl.textContent?.trim() || novel.title);
     
     const authorEl = Array.from(detailDoc.querySelectorAll('p, span, a')).find(el => el.textContent?.includes('作者：'));
     if (authorEl) {
@@ -1260,9 +1298,10 @@ const shukugeProvider: SourceProvider = {
     // 提取封面
     const coverImg = detailDoc.querySelector('.bookdcover img') || detailDoc.querySelector('img[alt="' + novel.title + '"]');
     if (coverImg) {
-      const src = coverImg.getAttribute('src');
+      let src = coverImg.getAttribute('src');
       if (src) {
-        novel.coverUrl = src.startsWith('http') ? src : `${SHUKUGE_URL}${src}`;
+        src = src.startsWith('http') ? src : `${SHUKUGE_URL}${src}`;
+        novel.coverUrl = proxifyImage(src);
       }
     }
 
@@ -1696,59 +1735,93 @@ const bqguiProvider: SourceProvider = {
   search: async (keyword: string): Promise<Novel[]> => {
     console.log(`[Bqgui] Searching for: ${keyword}喵~`);
     
-    // 优先尝试客户端直接 Fetch + Proxy (绕过 Puppeteer 限制)
+    // 1. 尝试直接搜索 (Vercel 环境下最可靠的方式)
     try {
         const searchUrl = `${BQGUI_URL}/s?q=${encodeURIComponent(keyword)}`;
+        // 笔趣阁可能返回 302 跳转到详情页，或者返回搜索列表
+        // 我们的 fetchText 会自动跟随重定向
         const html = await fetchText(searchUrl);
         const doc = parseHTML(html);
         
         const results: Novel[] = [];
-        const items = doc.querySelectorAll('.bookbox');
         
-        if (items.length > 0) {
-            console.log(`[Bqgui] Found ${items.length} items via direct fetch喵~`);
-            items.forEach(item => {
-                const link = item.querySelector('.bookname a') as HTMLAnchorElement;
-                if (link) {
-                    const title = link.textContent?.trim() || '';
-                    const author = item.querySelector('.author')?.textContent?.replace('作者：', '').trim() || '未知';
-                    const img = item.querySelector('.bookimg img') as HTMLImageElement;
-                    const coverUrl = img ? img.src : '';
-                    // 尝试从 .update 或 .intro 或 .uptime 提取简介
-                    let description = item.querySelector('.update')?.textContent?.replace('简介：', '').trim() || 
-                                      item.querySelector('.intro')?.textContent?.replace('简介：', '').trim() || 
-                                      item.querySelector('.uptime')?.textContent?.replace('简介：', '').trim() || '';
-                    
-                    const href = link.getAttribute('href');
-                    const detailUrl = href ? (href.startsWith('http') ? href : `${BQGUI_URL}${href}`) : '';
+        // 检查是否直接跳转到了详情页 (笔趣阁特性)
+        const metaOgType = doc.querySelector('meta[property="og:type"]')?.getAttribute('content');
+        if (metaOgType === 'novel') {
+             // 是详情页喵！
+             const title = doc.querySelector('meta[property="og:title"]')?.getAttribute('content') || 
+                           doc.querySelector('h1')?.textContent?.trim() || "";
+             const author = doc.querySelector('meta[property="og:novel:author"]')?.getAttribute('content') || "未知";
+             const description = doc.querySelector('meta[property="og:description"]')?.getAttribute('content') || "";
+             const coverUrl = doc.querySelector('meta[property="og:image"]')?.getAttribute('content') || "";
+             const detailUrl = doc.querySelector('meta[property="og:url"]')?.getAttribute('content') || searchUrl; // 使用最终URL
 
-                    if (detailUrl && !results.some(n => n.detailUrl === detailUrl)) {
-                        results.push({
-                            id: detailUrl,
-                            title, 
-                            detailUrl, 
-                            author, 
-                            description, 
-                            coverUrl,
-                            tags: [],
-                            status: 'Unknown',
-                            chapters: [],
-                            sourceName: '笔趣阁(GUI)'
-                        });
+             if (title && isRelevant(title, author, keyword)) {
+                 results.push({
+                     id: detailUrl,
+                     title,
+                     author,
+                     description,
+                     coverUrl: proxifyImage(coverUrl), // 使用代理处理封面
+                     tags: [],
+                     status: 'Unknown',
+                     chapters: [],
+                     sourceName: '笔趣阁(GUI)',
+                     detailUrl
+                 });
+             }
+        } else {
+            // 是搜索列表页喵
+            const items = doc.querySelectorAll('.bookbox');
+            
+            if (items.length > 0) {
+                console.log(`[Bqgui] Found ${items.length} items via direct fetch喵~`);
+                items.forEach(item => {
+                    const link = item.querySelector('.bookname a') as HTMLAnchorElement;
+                    if (link) {
+                        const title = link.textContent?.trim() || '';
+                        const author = item.querySelector('.author')?.textContent?.replace('作者：', '').trim() || '未知';
+                        const img = item.querySelector('.bookimg img') as HTMLImageElement;
+                        const coverUrl = img ? (img.src || img.getAttribute('src') || '') : '';
+                        
+                        // 尝试从 .update 或 .intro 或 .uptime 提取简介
+                        let description = item.querySelector('.update')?.textContent?.replace('简介：', '').trim() || 
+                                          item.querySelector('.intro')?.textContent?.replace('简介：', '').trim() || 
+                                          item.querySelector('.uptime')?.textContent?.replace('简介：', '').trim() || '';
+                        
+                        const href = link.getAttribute('href');
+                        const detailUrl = href ? (href.startsWith('http') ? href : `${BQGUI_URL}${href}`) : '';
+    
+                        if (detailUrl && !results.some(n => n.detailUrl === detailUrl)) {
+                            results.push({
+                                id: detailUrl,
+                                title, 
+                                detailUrl, 
+                                author, 
+                                description, 
+                                coverUrl: proxifyImage(coverUrl), // 代理处理封面
+                                tags: [],
+                                status: 'Unknown',
+                                chapters: [],
+                                sourceName: '笔趣阁(GUI)'
+                            });
+                        }
                     }
-                }
-            });
-            return results;
+                });
+            }
         }
+        
+        if (results.length > 0) return results;
+
     } catch (directError) {
         console.warn("[Bqgui] Direct fetch failed, trying API fallback喵~", directError);
     }
 
-    // Bqgui usually requires browser search due to AJAX
+    // 2. 如果直接搜索失败，尝试浏览器 API (Vercel 上会失败，作为本地回退)
     try {
         const browserSearchUrl = `/api/browser-search?site=bqgui&keyword=${encodeURIComponent(keyword)}`;
         const response = await fetch(browserSearchUrl, { 
-          signal: AbortSignal.timeout(30000)
+          signal: AbortSignal.timeout(15000) // 减少超时时间
         });
         const data = await response.json();
         
@@ -1757,7 +1830,7 @@ const bqguiProvider: SourceProvider = {
             id: item.detailUrl,
             title: item.title,
             author: item.author || '未知',
-            coverUrl: item.coverUrl || '',
+            coverUrl: proxifyImage(item.coverUrl || ''),
             description: item.description || '',
             tags: [],
             status: 'Unknown',

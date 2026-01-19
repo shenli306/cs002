@@ -481,7 +481,17 @@ export default function App() {
                   <div className="w-48 aspect-[2/3] bg-gradient-to-br from-indigo-900 to-slate-900 rounded-xl shadow-2xl flex items-center justify-center border border-white/10 mb-8 relative overflow-hidden group">
                     {selectedNovel.coverUrl ? (
                       <img 
-                        src={selectedNovel.coverUrl.startsWith('http') ? `/api/proxy?url=${encodeURIComponent(selectedNovel.coverUrl)}` : selectedNovel.coverUrl} 
+                        src={(() => {
+                          const coverUrl = selectedNovel.coverUrl;
+                          if (coverUrl.startsWith('/api/')) return coverUrl;
+                          try {
+                            const isLocalDev = window.location.hostname === 'localhost' && window.location.protocol === 'http:';
+                            if (isLocalDev) return coverUrl;
+                          } catch {
+                          }
+                          if (coverUrl.startsWith('http')) return `/api/proxy?url=${encodeURIComponent(coverUrl)}`;
+                          return coverUrl;
+                        })()} 
                         alt={selectedNovel.title} 
                         className="w-full h-full object-cover" 
                       />

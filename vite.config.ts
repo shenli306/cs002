@@ -882,6 +882,14 @@ export default defineConfig(({ mode }) => {
                   for (const [key, value] of Object.entries(proxyRes.headers)) {
                     if (value) res.setHeader(key, value);
                   }
+
+                  const contentType = String(proxyRes.headers['content-type'] || '').toLowerCase();
+                  if (contentType.startsWith('image/')) {
+                    res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
+                    res.removeHeader('pragma');
+                    res.removeHeader('expires');
+                  }
+
                   proxyRes.pipe(res);
                 });
 
@@ -1217,15 +1225,15 @@ export default defineConfig(({ mode }) => {
                         items.forEach(item => {
                           const link = item.querySelector('.bookname a') as HTMLAnchorElement;
                           if (link) {
-                            const title = link.innerText?.trim() || '';
-                            const author = item.querySelector('.author')?.innerText?.replace('作者：', '').trim() || '未知';
+                            const title = link.textContent?.trim() || '';
+                            const author = item.querySelector('.author')?.textContent?.replace('作者：', '').trim() || '未知';
                             if (isRelevant(title, author)) {
                                const img = item.querySelector('.bookimg img') as HTMLImageElement;
                                const coverUrl = img ? img.src : '';
                                // 尝试从 .update 或 .intro 或 .uptime 提取简介
-                               let description = item.querySelector('.update')?.innerText?.replace('简介：', '').trim() || 
-                                                 item.querySelector('.intro')?.innerText?.replace('简介：', '').trim() || 
-                                                 item.querySelector('.uptime')?.innerText?.replace('简介：', '').trim() || '';
+                               let description = item.querySelector('.update')?.textContent?.replace('简介：', '').trim() || 
+                                                 item.querySelector('.intro')?.textContent?.replace('简介：', '').trim() || 
+                                                 item.querySelector('.uptime')?.textContent?.replace('简介：', '').trim() || '';
                                
                                if (!novels.some(n => n.detailUrl === link.href)) {
                                  novels.push({
