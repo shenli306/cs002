@@ -190,10 +190,52 @@ export default function App() {
     return () => clearInterval(timer);
   }, [suggestions]);
 
+  // Load danmaku from server on mount 喵~
+  useEffect(() => {
+    const loadDanmaku = async () => {
+      try {
+        const res = await fetch('/api/danmaku');
+        if (res.ok) {
+          const savedData = await res.json();
+          if (Array.isArray(savedData) && savedData.length > 0) {
+            setSuggestions(savedData);
+            // Initial display 喵~
+            const loadedItems = savedData.map((text: string) => ({
+              id: Math.random().toString(36).substr(2, 9),
+              text,
+              top: getRandomLaneTop(),
+              duration: 15 + Math.random() * 5,
+              startTime: Date.now() + Math.random() * 2000
+            }));
+            setActiveDanmaku(loadedItems);
+          }
+        }
+      } catch (e) {
+        console.error("Failed to load danmaku", e);
+      }
+    };
+    loadDanmaku();
+  }, []);
+
+  const persistDanmaku = async (newSuggestions: string[]) => {
+    try {
+      await fetch('/api/danmaku', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newSuggestions)
+      });
+    } catch (e) {
+      console.error("Failed to save danmaku", e);
+    }
+  };
+
   const handleAddSuggestion = (e: React.FormEvent) => {
     e.preventDefault();
     if (!suggestionInput.trim()) return;
-    setSuggestions(prev => [...prev, suggestionInput.trim()]);
+
+    const newSuggestions = [...suggestions, suggestionInput.trim()];
+    setSuggestions(newSuggestions);
+    persistDanmaku(newSuggestions);
     
     // Spawn immediately for feedback
     const newItem: DanmakuItem = {
@@ -213,7 +255,10 @@ export default function App() {
     const item = activeDanmaku.find(i => i.id === id);
     if (item) {
       // Direct delete without confirmation 喵~
-      setSuggestions(prev => prev.filter(s => s !== item.text));
+      const newSuggestions = suggestions.filter(s => s !== item.text);
+      setSuggestions(newSuggestions);
+      persistDanmaku(newSuggestions);
+
       setActiveDanmaku(prev => prev.filter(i => i.id !== id));
     }
   };

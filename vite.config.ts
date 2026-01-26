@@ -1499,6 +1499,51 @@ export default defineConfig(({ mode }) => {
               return;
             }
 
+            // Danmaku Storage API 喵~
+            if (url.pathname === '/api/danmaku') {
+              import('fs').then(fs => {
+                import('path').then(path => {
+                  const danmakuFile = path.join(__dirname, 'danmaku.json');
+
+                  if (req.method === 'GET') {
+                    try {
+                      if (fs.existsSync(danmakuFile)) {
+                        const data = fs.readFileSync(danmakuFile, 'utf-8');
+                        res.setHeader('Content-Type', 'application/json');
+                        res.end(data);
+                      } else {
+                        res.setHeader('Content-Type', 'application/json');
+                        res.end(JSON.stringify([]));
+                      }
+                    } catch (err: any) {
+                      res.statusCode = 500;
+                      res.end(JSON.stringify({ error: err.message }));
+                    }
+                    return;
+                  }
+
+                  if (req.method === 'POST') {
+                    let body = '';
+                    req.on('data', chunk => body += chunk);
+                    req.on('end', () => {
+                      try {
+                        // Just validate it's JSON
+                        JSON.parse(body);
+                        fs.writeFileSync(danmakuFile, body, 'utf-8');
+                        res.setHeader('Content-Type', 'application/json');
+                        res.end(JSON.stringify({ success: true }));
+                      } catch (err: any) {
+                        res.statusCode = 500;
+                        res.end(JSON.stringify({ error: err.message }));
+                      }
+                    });
+                    return;
+                  }
+                });
+              });
+              return;
+            }
+
             next();
           });
         }
