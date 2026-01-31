@@ -250,12 +250,12 @@ const cleanupSearchCache = (): void => {
   const now = Date.now();
   let cleanedCount = 0;
   
-  for (const [key, value] of searchCache.entries()) {
+  Array.from(searchCache.entries()).forEach(([key, value]) => {
     if (now - value.timestamp > CACHE_DURATION) {
       searchCache.delete(key);
       cleanedCount++;
     }
-  }
+  });
   
   if (cleanedCount > 0) {
     console.log(`[Cache] Cleaned ${cleanedCount} expired search entries喵~`);
@@ -2494,6 +2494,7 @@ getChapterContent: async (chapter: Chapter): Promise<string> => {
   
   return await fetchContentRecursively(chapter.url);
 }
+};
 
 export const PROVIDERS: SourceProvider[] = [wanbengeProvider, yedujiProvider, shukugeProvider, dingdianProvider, bqguiProvider, xpxsProvider, localProvider];
 
