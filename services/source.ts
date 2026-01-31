@@ -2376,126 +2376,124 @@ const xpxsProvider: SourceProvider = {
         sourceName: '虾皮小说'
     };
   },
-  getChapterContent: async (chapter: Chapter): Promise<string> => {
-    const fetchChapterHtml = async (url: string) => {
-        let html = "";
-        try {
-            html = await fetchText(url, undefined, 'utf-8');
-            if (html.includes("charset=gb") || html.includes("charset=\"gb") || html.includes('琚')) {
-                html = await fetchText(url, undefined, 'gb18030');
-            }
-            if (html.length < 500) {
-                throw new Error("Content too short");
-            }
-            return html;
-        } catch (e) {
-            try {
-                const browserDetailsUrl = `/api/browser-details?url=${encodeURIComponent(url)}`;
-                const response = await fetch(browserDetailsUrl);
-                const data = await response.json();
-                if (data.success && data.html) {
-                    return data.html;
-                }
-            } catch (browserError) {
-            }
-        }
-        throw new Error("无法获取章节内容喵~");
-    };
+getChapterContent: async (chapter: Chapter): Promise<string> => {
+  const fetchChapterHtml = async (url: string) => {
+      let html = "";
+      try {
+          html = await fetchText(url, undefined, 'utf-8');
+          if (html.includes("charset=gb") || html.includes("charset=\"gb") || html.includes('琚')) {
+              html = await fetchText(url, undefined, 'gb18030');
+          }
+          if (html.length < 500) {
+              throw new Error("Content too short");
+          }
+          return html;
+      } catch (e) {
+          try {
+              const browserDetailsUrl = `/api/browser-details?url=${encodeURIComponent(url)}`;
+              const response = await fetch(browserDetailsUrl);
+              const data = await response.json();
+              if (data.success && data.html) {
+                  return data.html;
+              }
+          } catch (browserError) {
+          }
+      }
+      throw new Error("无法获取章节内容喵~");
+  };
 
-    const fetchContentRecursively = async (url: string, visited: Set<string> = new Set()): Promise<string> => {
-        if (visited.has(url)) return "";
-        visited.add(url);
-        
-        console.log(`[Xpxs] Fetching chapter content: ${url}喵~`);
-        const html = await fetchChapterHtml(url);
-        const doc = parseHTML(html);
-        
-        const contentEl = doc.querySelector('#content') || doc.querySelector('.content') || doc.querySelector('#chaptercontent') || doc.querySelector('.read-content');
-        if (!contentEl) throw new Error("未找到章节内容喵~");
-        
-        // 检查下一页 (在清理 DOM 之前先查找，防止被误删喵~)
-        // 通常是 "下一页" 链接
-        const nextLink = Array.from(doc.querySelectorAll('a')).find(a => a.textContent?.includes('下一页'));
-        
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = contentEl.innerHTML;
-        tempDiv.querySelectorAll('script, style, ins, .ads, .ad, .advertisement').forEach(el => el.remove());
-        let text = tempDiv.innerHTML
-            .replace(/<br\s*\/?>/gi, '\n')
-            .replace(/<p[^>]*>/gi, '')
-            .replace(/<\/p>/gi, '\n')
-            .replace(/&nbsp;/g, ' ')
-            .replace(/&lt;/g, '<')
-            .replace(/&gt;/g, '>')
-            .replace(/&amp;/g, '&')
-            .trim();
-        const cleanDiv = document.createElement('div');
-        cleanDiv.innerHTML = text;
-        let cleanText = cleanDiv.textContent || "";
-        
-        // 加强噪声过滤：先用正则移除整个广告句子喵～
-        // 匹配“虾皮小说【www.xpxs.net】第一时间更新《小说名》最新章节。”（小说名任意）
-        cleanText = cleanText.replace(/虾皮小说【www\.xpxs\.net】第一时间更新《[^》]+》最新章节。/g, '');
-        // 匹配“本章未完，点击下一页继续阅读。”
-        cleanText = cleanText.replace(/本章未完，点击下一页继续阅读。/g, '');
-        
-        // 原有噪声关键词列表，加强版喵～
-        const noiseTokens = [
-          '虾皮小说', 'www.xpxs.net', 'xpxs.net', 'https://www.xpxs.net',
-          '第一时间更新', '最新章节', '本章未完', '点击下一页', '继续阅读'
-        ];
-        
-        const normalizeLine = (line: string) => {
-            let out = line.replace(/\u00a0/g, ' ');
-            noiseTokens.forEach(token => {
-                out = out.split(token).join('');
-            });
-            return out.trim();
-        };
-        
-        cleanText = cleanText
-            .split('\n')
-            .map(normalizeLine)
-            .filter(line => line.length > 0)
-            .join('\n\n');
-        
-        // 如果内容还太短，尝试兜底提取喵～
-        if (!cleanText || cleanText.trim().length < 20) {
-            const fallbackText = contentEl.textContent || "";
-            const lines = fallbackText
-                .split('\n')
-                .map(normalizeLine)
-                .filter(line => line.length > 0);
-            cleanText = lines.join('\n\n').trim();
-        }
-        if (!cleanText || cleanText.trim().length < 20) {
-            const bodyText = doc.body.textContent || "";
-            const lines = bodyText.split('\n')
-                .map(normalizeLine)
-                .filter(line => line.length > 0);
-            cleanText = lines.join('\n\n').trim();
-        }
-            
-        if (nextLink) {
-            const nextHref = nextLink.getAttribute('href');
-            if (nextHref) {
-                const nextUrl = nextHref.startsWith('http') ? nextHref : `${XPXS_URL}${nextHref}`;
-                // 只有当下一页是当前章节的分页时才继续 (通常文件名包含 _2, _3 或在同一目录)
-                // 简单判断：如果不是 "下一章" 的链接。通常 "下一章" 会有明确的文本或 ID 变化大。
-                // 虾皮小说分页通常是 chapter_2.html
-                if (nextUrl.includes('_') || !nextLink.textContent?.includes('章')) {
-                     const nextContent = await fetchContentRecursively(nextUrl, visited);
-                     return cleanText + "\n\n" + nextContent;
-                }
-            }
-        }
-        
-        return cleanText;
-    };
-    
-    return await fetchContentRecursively(chapter.url);
-  }
-};
+  const fetchContentRecursively = async (url: string, visited: Set<string> = new Set()): Promise<string> => {
+      if (visited.has(url)) return "";
+      visited.add(url);
+      
+      console.log(`[Xpxs] Fetching chapter content: ${url}喵~`);
+      const html = await fetchChapterHtml(url);
+      const doc = parseHTML(html);
+      
+      const contentEl = doc.querySelector('#content') || doc.querySelector('.content') || doc.querySelector('#chaptercontent') || doc.querySelector('.read-content');
+      if (!contentEl) throw new Error("未找到章节内容喵~");
+      
+      // 检查下一页
+      const nextLink = Array.from(doc.querySelectorAll('a')).find(a => a.textContent?.includes('下一页'));
+      
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = contentEl.innerHTML;
+      
+      // 加强清理：把脚本、广告、隐藏元素、所有a链接（包括报错链接）都移除掉喵～
+      tempDiv.querySelectorAll('script, style, ins, .ads, .ad, .advertisement, a').forEach(el => el.remove());
+      
+      let text = tempDiv.innerHTML
+          .replace(/<br\s*\/?>/gi, '\n')
+          .replace(/<p[^>]*>/gi, '')
+          .replace(/<\/p>/gi, '\n')
+          .replace(/&nbsp;/g, ' ')
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/&amp;/g, '&')
+          .trim();
+      
+      const cleanDiv = document.createElement('div');
+      cleanDiv.innerHTML = text;
+      let cleanText = cleanDiv.textContent || "";
+      
+      // 依然保留之前的正则大块广告移除
+      cleanText = cleanText.replace(/虾皮小说【www\.xpxs\.net】第一时间更新《[^》]+》最新章节。/g, '');
+      cleanText = cleanText.replace(/本章未完，点击下一页继续阅读。/g, '');
+      
+      // 加强噪声关键词过滤
+      const noiseTokens = [
+        '虾皮小说', 'www.xpxs.net', 'xpxs.net', 'https://www.xpxs.net',
+        '第一时间更新', '最新章节', '本章未完', '点击下一页', '继续阅读',
+        '章节报错', '免登录'  // 额外加了这两个，防止残留文字
+      ];
+      
+      const normalizeLine = (line: string) => {
+          let out = line.replace(/\u00a0/g, ' ');
+          noiseTokens.forEach(token => {
+              out = out.split(token).join('');
+          });
+          return out.trim();
+      };
+      
+      cleanText = cleanText
+          .split('\n')
+          .map(normalizeLine)
+          .filter(line => line.length > 0)
+          .join('\n\n');
+      
+      // 兜底提取
+      if (!cleanText || cleanText.trim().length < 20) {
+          const fallbackText = contentEl.textContent || "";
+          const lines = fallbackText
+              .split('\n')
+              .map(normalizeLine)
+              .filter(line => line.length > 0);
+          cleanText = lines.join('\n\n').trim();
+      }
+      if (!cleanText || cleanText.trim().length < 20) {
+          const bodyText = doc.body.textContent || "";
+          const lines = bodyText.split('\n')
+              .map(normalizeLine)
+              .filter(line => line.length > 0);
+          cleanText = lines.join('\n\n').trim();
+      }
+          
+      if (nextLink) {
+          const nextHref = nextLink.getAttribute('href');
+          if (nextHref) {
+              const nextUrl = nextHref.startsWith('http') ? nextHref : `${XPXS_URL}${nextHref}`;
+              if (nextUrl.includes('_') || !nextLink.textContent?.includes('章')) {
+                   const nextContent = await fetchContentRecursively(nextUrl, visited);
+                   return cleanText + "\n\n" + nextContent;
+              }
+          }
+      }
+      
+      return cleanText;
+  };
+  
+  return await fetchContentRecursively(chapter.url);
+}
 
 export const PROVIDERS: SourceProvider[] = [wanbengeProvider, yedujiProvider, shukugeProvider, dingdianProvider, bqguiProvider, xpxsProvider, localProvider];
 
