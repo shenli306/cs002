@@ -2432,7 +2432,19 @@ const xpxsProvider: SourceProvider = {
         const cleanDiv = document.createElement('div');
         cleanDiv.innerHTML = text;
         let cleanText = cleanDiv.textContent || "";
-        const noiseTokens = ['虾皮小说', 'www.xpxs.net', 'xpxs.net', 'https://www.xpxs.net'];
+        
+        // 加强噪声过滤：先用正则移除整个广告句子喵～
+        // 匹配“虾皮小说【www.xpxs.net】第一时间更新《小说名》最新章节。”（小说名任意）
+        cleanText = cleanText.replace(/虾皮小说【www\.xpxs\.net】第一时间更新《[^》]+》最新章节。/g, '');
+        // 匹配“本章未完，点击下一页继续阅读。”
+        cleanText = cleanText.replace(/本章未完，点击下一页继续阅读。/g, '');
+        
+        // 原有噪声关键词列表，加强版喵～
+        const noiseTokens = [
+          '虾皮小说', 'www.xpxs.net', 'xpxs.net', 'https://www.xpxs.net',
+          '第一时间更新', '最新章节', '本章未完', '点击下一页', '继续阅读'
+        ];
+        
         const normalizeLine = (line: string) => {
             let out = line.replace(/\u00a0/g, ' ');
             noiseTokens.forEach(token => {
@@ -2440,11 +2452,14 @@ const xpxsProvider: SourceProvider = {
             });
             return out.trim();
         };
+        
         cleanText = cleanText
             .split('\n')
             .map(normalizeLine)
             .filter(line => line.length > 0)
             .join('\n\n');
+        
+        // 如果内容还太短，尝试兜底提取喵～
         if (!cleanText || cleanText.trim().length < 20) {
             const fallbackText = contentEl.textContent || "";
             const lines = fallbackText
