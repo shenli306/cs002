@@ -10,7 +10,7 @@ interface VideoFile {
 
 interface VideoCardProps {
   video: VideoFile;
-  onSelect: (video: VideoFile) => void;
+  onSelect?: (video: VideoFile) => void;
 }
 
 // 全局缩略图生成队列控制喵~
@@ -29,6 +29,11 @@ const processThumbnailQueue = () => {
 };
 
 export function VideoCard({ video, onSelect }: VideoCardProps) {
+  const handleClick = () => {
+    if (onSelect) {
+      onSelect(video);
+    }
+  };
   const [thumbnail, setThumbnail] = useState<string | null>(null);
   const [duration, setDuration] = useState<string | null>(null);
   const [isInView, setIsInView] = useState(false);
@@ -136,7 +141,7 @@ export function VideoCard({ video, onSelect }: VideoCardProps) {
   return (
     <div 
       ref={containerRef}
-      onClick={() => onSelect(video)}
+      onClick={handleClick}
       className="group relative glass-panel rounded-3xl overflow-hidden cursor-pointer transition-all duration-500 hover:scale-[1.02] hover:shadow-[0_20px_40px_-15px_rgba(255,158,206,0.3)] border border-white/10 hover:border-pink-500/30"
     >
       {/* 隐藏的视频元素用于提取元数据，仅在进入视口并排队成功后加载喵~ */}
